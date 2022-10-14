@@ -98,7 +98,7 @@ parser.add_argument('--borrow_from_train_data', type=str_to_bool, default=False,
 parser.add_argument('--num_neighbors_borrow', type=int, default=5, help="number of neighbors to borrow from, during aggregation")
 parser.add_argument('--dist_exp_value', type=float, default=0.5, help="the exponent value")
 parser.add_argument('--neighbor_temp', type=float, default=0.1, help="the temperature paramter")
-parser.add_argument('--use_ewp', type=str_to_bool, default=False, help="whether to use ensemble weight predictor, ie, FDW") ## TODO Here you can choose whether Ensemble weight Predictor
+parser.add_argument('--use_ewp', type=str_to_bool, default=False, help="whether to use ensemble weight predictor, ie, FDW")
 
 parser.add_argument('--fraction_prots', type=float, default=1.0, help="fraction of the training data to be used as the Retrieval Set")
 
@@ -203,6 +203,7 @@ def main(runid):
                     id = perm[j * num_sub:(j + 1) * num_sub]
                 else:
                     id = perm[j * num_sub:]
+                id = id.astype(np.int64)
                 id = torch.tensor(id).to(device)
                 tx = trainx[:, :, id, :]
                 ty = trainy[:, :, id, :]
@@ -305,17 +306,8 @@ def main(runid):
 
             if not args.predefined_S:
                 if args.borrow_from_train_data:
-                    # TODO Here derive kNN Neighbors. 
-                    # Our proposal modify how to retrieve the K-neighbourhoods. 
-                    # Change this obrain_relavant_data_from_prototypes to something else. 
-                    #
-                    # the code should be like follows. 
-                    # Eventually we need to return neighbours in a new method
-                    #
-                    # orig_neighs = proposed.retrieve_neighbors(testx, instance_prototypes, idx_current_nodes....) # proposed.py 
-
                     testx, dist_prot, orig_neighs, neighbs_idxs, original_instances = obtain_relevant_data_from_prototypes(args, testx, instance_prototypes,
-                                                                                            idx_current_nodes)  
+                                                                                            idx_current_nodes)
                 else:
                     testx = zero_out_remaining_input(testx, idx_current_nodes, args.device) # Remove the data corresponding to the variables that are not a part of subset "S"
 
@@ -338,29 +330,16 @@ def main(runid):
                         _split_preds.append(preds[start:end].unsqueeze(1))
                     preds = torch.cat(_split_preds, dim=1)
 
-                    
-                    # TODO Here is the main proposal part, where the neighbors will be aggregated in the proposed methods. 
-                    # Our method will modify how to aggregate the neighbors. 
-                    # 
-                    # the code should be like follows. 
-                    # Eventually we need to return weights (Distance to Prot = dist_prot) from the neighbourhood of original data point. 
-                    #
-                    # dist_prot = proposed.aggregation(orig_neighs,....) # proposed.py 
-
-                    if args.use_ewp:    
-                        # TODO here corresponds to 5.2.3 of the paper
+                    if args.use_ewp:
                         orig_neighs_forecasts = engine.model(orig_neighs, args=args, mask_remaining=args.mask_remaining, test_idx_subset=idx_current_nodes)
                         dist_prot, orig_neighs_forecasts_reshaped = obtain_discrepancy_from_neighs(preds, orig_neighs_forecasts, args, idx_current_nodes)
                         dist_prot = torch.nn.functional.softmax(-dist_prot / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow, 1, 1)
 
                     else:
-                        # TODO here corresponds to 5.2.1 and 5.2.2
-                        # 
                         # DDW scheme
-                        # dist_prot = torch.nn.functional.softmax(-dist_prot / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow, 1, 1) 
-                        #
-                        # UW scheme
+                        # dist_prot = torch.nn.functional.softmax(-dist_prot / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow, 1, 1)
 
+                        # UW scheme
                         uniform_tensor = torch.FloatTensor( np.ones(args.num_neighbors_borrow) / args.num_neighbors_borrow ).to(args.device).unsqueeze(0).repeat(b_size, 1)
                         dist_prot = uniform_tensor.view(b_size, args.num_neighbors_borrow, 1, 1)
 
