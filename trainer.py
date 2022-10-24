@@ -6,6 +6,7 @@
 # https://opensource.org/licenses/MIT.
 
 """ The code containing Trainer class and optimizer """
+import torch.nn.functional
 import torch.optim as optim
 import math
 from net import *
@@ -67,7 +68,6 @@ class Trainer():
 
         rmse = util.masked_rmse(predict,real,0.0)[0].item()
         return loss[0].item(), rmse
-
 
 
 class Optim(object):
@@ -133,3 +133,51 @@ class Optim(object):
         self.last_ppl = ppl
 
         self._makeOptimizer()
+
+
+class Trainer_memory():
+    def __init__(self, args, model, model_name, lrate, wdecay, clip, step_size, scaler, device, cl=True):
+        self.args = args
+        self.scaler = scaler
+        self.model = model
+        self.model_name = model_name
+        self.model.to(device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=lrate, weight_decay=wdecay)
+        self.loss = util.masked_mae
+        self.clip = clip
+        self.step = step_size
+        self.iter = 1
+        self.task_level = 1
+        self.cl = cl
+
+    def train(self, args, input, real_val, epoch_num, batches_per_epoch, current_epoch_batch_num):
+        self.model.train()
+        self.optimizer.zero_grad()
+
+        predict = self.model(input)
+        # loss, _ = self.loss(predict, real_val, 0.0)
+        loss = torch.nn.functional.mse_loss(predict, real_val)
+        loss.backward()
+
+        if self.clip is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+
+        self.optimizer.step()
+        # mae = util.masked_mae(predict,real,0.0)[0].item()
+        # rmse = util.masked_rmse(predict, real_val, 0.0)[0].item()
+        rmse = torch.nn.functional.mse_loss(predict, real_val)
+        self.iter += 1
+        return loss.item(), rmse
+
+    def eval(self, args, input, real_val):
+        self.model.eval()
+        output = self.model(input)
+        # real = torch.unsqueeze(real_val, dim=1)
+        real = real_val
+        predict = self.scaler.inverse_transform(output)
+
+        # loss = self.loss(predict, real, 0.0)
+        loss = torch.nn.functional.mse_loss(predict, real_val)
+        rmse = util.masked_rmse(predict, real, 0.0)[0].item()
+        return loss.item(), rmse
+

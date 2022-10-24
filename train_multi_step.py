@@ -6,13 +6,19 @@
 # https://opensource.org/licenses/MIT.
 
 """ The primary training script with our wrapper technique """
+import os
+
 import torch
 import numpy as np
 import argparse
 import time
 from util import *
 from trainer import Trainer
-from net import gtnet
+from net import gtnet, s2s_gtnet
+from encoder import Encoder
+from decoder import Decoder
+from model import ED
+from net_params import convgru_encoder_params, convgru_decoder_params
 import ast
 from copy import deepcopy
 
@@ -161,6 +167,9 @@ def main(runid):
     if not os.path.exists(args.path_model_save):
         os.makedirs(args.path_model_save)
 
+    encoder = Encoder(convgru_encoder_params[0], convgru_encoder_params[1])
+    decoder = Decoder(convgru_decoder_params[0], convgru_decoder_params[1])
+    s2s = ED(encoder, decoder)
     model = gtnet(args.gcn_true, args.buildA_true, args.gcn_depth, args.num_nodes,
                     device, predefined_A=predefined_A,
                     dropout=args.dropout, subgraph_size=args.subgraph_size,
@@ -171,13 +180,16 @@ def main(runid):
                     seq_length=args.seq_in_len, in_dim=args.in_dim, out_dim=args.seq_out_len,
                     layers=args.layers, propalpha=args.propalpha, tanhalpha=args.tanhalpha, layer_norm_affline=True)
 
+    s2s_gtnet_model = s2s_gtnet(s2s, model)
+
+
     print('The recpetive field size is', model.receptive_field)
 
     print(args)
     nParams = sum([p.nelement() for p in model.parameters()])
     print('Number of model parameters is', nParams)
 
-    engine = Trainer(args, model, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, scaler, device, args.cl)
+    engine = Trainer(args, s2s_gtnet_model, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, scaler, device, args.cl)
 
     print("start training...",flush=True)
     his_loss =[]
@@ -207,6 +219,7 @@ def main(runid):
                 id = torch.tensor(id).to(device)
                 tx = trainx[:, :, id, :]
                 ty = trainy[:, :, id, :]
+                tx = torch.permute(tx, [0, 3, 1, 2])
                 metrics = engine.train(args, tx, ty[:,0,:,:], i, dataloader['train_loader'].num_batch, iter, id)
                 train_loss.append(metrics[0])
                 train_rmse.append(metrics[1])
@@ -256,7 +269,7 @@ def main(runid):
         print("The valid loss on best model is", str(round(his_loss[bestid],4)))
 
 
-    engine.model.load_state_dict(torch.load(args.path_model_save + "exp" + str(args.expid) + "_" + str(runid) +".pth"))
+    engine.model.load_state_dict(torch.load(args.path_model_save + "exp" + str(args.expid) + "_" + str(runid) +".pth", map_location=torch.device('cpu')))
     print("\nModel loaded\n")
 
     engine.model.eval()
@@ -284,7 +297,7 @@ def main(runid):
             print("running on random node idx split ", split_run)
 
             if args.do_full_set_oracle:
-                idx_current_nodes = np.arange( args.num_nodes, dtype=int ).reshape(-1)
+                idx_current_nodes = np.arange(args.num_nodes, dtype=int).reshape(-1)
                 assert idx_current_nodes.shape[0] == args.num_nodes
 
             else:
@@ -376,6 +389,7 @@ def main(runid):
 
         random_node_split_avg_mae.append(mae)
         random_node_split_avg_rmse.append(rmse)
+        pass
 
     return random_node_split_avg_mae, random_node_split_avg_rmse
 

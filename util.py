@@ -175,6 +175,33 @@ def load_dataset(args, dataset_dir, batch_size, valid_batch_size= None, test_bat
     return data
 
 
+def load_dataset_memory(args, dataset_dir, batch_size, valid_batch_size= None, test_batch_size=None):
+    data = {}
+    total_num_nodes = None
+    for category in ['train', 'valid', 'test']:
+        data['x_' + category] = torch.load(os.path.join(dataset_dir, 'memory_' + category + '.pt'))[:, 0, :, -1].squeeze()
+        data['y_' + category] = torch.load(os.path.join(dataset_dir, 'memory_' + category + '_label.pt'))[:, -1, :, 0].squeeze()
+        data['y_' + category] = torch.repeat_interleave(data['y_' + category], 3, dim=0)
+
+        print("Shape of ", category, " input = ", data['x_' + category].shape)
+
+        total_num_nodes = data['x_' + category].shape[0]
+        data['total_num_nodes'] = total_num_nodes
+
+
+    scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())
+    # Data format
+    for category in ['train', 'valid', 'test']:
+        data['x_' + category][..., 0] = scaler.transform(data['x_' + category][..., 0])
+
+    data['train_loader'] = DataLoaderM(data['x_train'], data['y_train'], batch_size)
+    data['val_loader'] = DataLoaderM(data['x_valid'], data['y_valid'], valid_batch_size)
+    data['test_loader'] = DataLoaderM(data['x_test'], data['y_test'], test_batch_size)
+    data['scaler'] = scaler
+    return data
+
+
+
 
 def masked_mse(preds, labels, null_val=np.nan):
     if np.isnan(null_val):
