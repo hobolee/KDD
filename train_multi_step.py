@@ -13,7 +13,7 @@ import numpy as np
 import argparse
 import time
 from util import *
-from trainer import Trainer
+from trainer import Trainer, Trainer_memory
 from net import gtnet, s2s_gtnet
 from encoder import Encoder
 from decoder import Decoder
@@ -183,13 +183,17 @@ def main(runid):
     s2s_gtnet_model = s2s_gtnet(s2s, model)
 
 
+
     print('The recpetive field size is', model.receptive_field)
 
     print(args)
     nParams = sum([p.nelement() for p in model.parameters()])
     print('Number of model parameters is', nParams)
 
-    engine = Trainer(args, s2s_gtnet_model, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, scaler, device, args.cl)
+
+    # engine = Trainer(args, s2s_gtnet_model, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, scaler, device, args.cl)
+    engine = Trainer(args, model, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, scaler, device, args.cl)
+    engine2 = Trainer_memory(args, s2s, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, scaler, device, args.cl)
 
     print("start training...",flush=True)
     his_loss =[]
@@ -239,6 +243,7 @@ def main(runid):
             testx = testx.transpose(1, 3)
             testy = torch.Tensor(y).to(device)
             testy = testy.transpose(1, 3)
+            testx = torch.permute(testx, [0, 3, 1, 2])
             metrics = engine.eval(args, testx, testy[:,0,:,:])
             valid_loss.append(metrics[0])
             valid_rmse.append(metrics[1])
@@ -269,10 +274,14 @@ def main(runid):
         print("The valid loss on best model is", str(round(his_loss[bestid],4)))
 
 
-    engine.model.load_state_dict(torch.load(args.path_model_save + "exp" + str(args.expid) + "_" + str(runid) +".pth", map_location=torch.device('cpu')))
+    engine.model.load_state_dict(torch.load(args.path_model_save + "exp" + str(args.expid) + "_" + str(runid) +".pth"))
+
+    # seq2se1
+    engine2.model.load_state_dict(torch.load(r"C:\Users\hliem\pycharm projects\KDD\saved_models\tri_memory\predefined\exp2_0.pth"))
     print("\nModel loaded\n")
 
     engine.model.eval()
+    engine2.model.eval()
 
 
     # Retrieval set as the training data
@@ -303,14 +312,18 @@ def main(runid):
             else:
                 idx_current_nodes = get_node_random_idx_split(args, args.num_nodes, args.lower_limit_random_node_selections, args.upper_limit_random_node_selections)
 
+            # print(idx_current_nodes)
+            # idx_current_nodes = np.array([ 33, 114,  42,  54, 110,  62, 121,  74, 131,   1, 111, 116,   9,  56,  38, 113,  22, 119, 129, 109,  41])
+            # print(idx_current_nodes)
             print("Number of nodes in current random split run = ", idx_current_nodes.shape)
 
 
         outputs = []
+        outputs_v = []
         realy = torch.Tensor(dataloader['y_test']).to(device)
         realy = realy.transpose(1, 3)[:, 0, :, :]
-        if not args.predefined_S:
-            realy = realy[:, idx_current_nodes, :]
+        # if not args.predefined_S:
+        #     realy = realy[:, idx_current_nodes, :]
 
 
         for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
@@ -319,7 +332,7 @@ def main(runid):
 
             if not args.predefined_S:
                 if args.borrow_from_train_data:
-                    testx, dist_prot, orig_neighs, neighbs_idxs, original_instances = obtain_relevant_data_from_prototypes(args, testx, instance_prototypes,
+                    testx, dist_prot, orig_neighs, neighbs_idxs, original_instances, testx_v = obtain_relevant_data_from_prototypes(args, testx, instance_prototypes,
                                                                                             idx_current_nodes)
                 else:
                     testx = zero_out_remaining_input(testx, idx_current_nodes, args.device) # Remove the data corresponding to the variables that are not a part of subset "S"
@@ -327,12 +340,21 @@ def main(runid):
             with torch.no_grad():
                 if args.predefined_S:
                     idx_current_nodes = None
+
+                # testx = torch.permute(testx, [0, 3, 1, 2])
+                # testx = engine2.model(testx)
+                # testx = torch.permute(testx, [0, 2, 3, 1])
                 preds = engine.model(testx, args=args, mask_remaining=args.mask_remaining, test_idx_subset=idx_current_nodes)
+                testx_v = testx_v.to(args.device)
+                preds_v = engine.model(testx_v, args=args, mask_remaining=args.mask_remaining, test_idx_subset=idx_current_nodes)
 
                 preds = preds.transpose(1, 3)
                 preds = preds[:, 0, :, :]
-                if not args.predefined_S:
-                    preds = preds[:, idx_current_nodes, :]
+                preds_v = preds_v.transpose(1, 3)
+                preds_v = preds_v[:, 0, :, :]
+                # if not args.predefined_S:
+                #     preds = preds[:, idx_current_nodes, :]
+                #     preds_v = preds_v[:, idx_current_nodes, :]
 
                 # aggregating from multiple neighbors
                 if args.borrow_from_train_data:
@@ -344,22 +366,23 @@ def main(runid):
                     preds = torch.cat(_split_preds, dim=1)
 
                     if args.use_ewp:
+                        # orig_neighs = torch.permute(orig_neighs, [0, 3, 1, 2])
                         orig_neighs_forecasts = engine.model(orig_neighs, args=args, mask_remaining=args.mask_remaining, test_idx_subset=idx_current_nodes)
                         dist_prot, orig_neighs_forecasts_reshaped = obtain_discrepancy_from_neighs(preds, orig_neighs_forecasts, args, idx_current_nodes)
                         dist_prot = torch.nn.functional.softmax(-dist_prot / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow, 1, 1)
 
                     else:
                         # DDW scheme
-                        # dist_prot = torch.nn.functional.softmax(-dist_prot / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow, 1, 1)
+                        dist_prot = torch.nn.functional.softmax(-dist_prot / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow, 1, 1)
 
                         # UW scheme
-                        uniform_tensor = torch.FloatTensor( np.ones(args.num_neighbors_borrow) / args.num_neighbors_borrow ).to(args.device).unsqueeze(0).repeat(b_size, 1)
-                        dist_prot = uniform_tensor.view(b_size, args.num_neighbors_borrow, 1, 1)
+                        # uniform_tensor = torch.FloatTensor( np.ones(args.num_neighbors_borrow) / args.num_neighbors_borrow ).to(args.device).unsqueeze(0).repeat(b_size, 1)
+                        # dist_prot = uniform_tensor.view(b_size, args.num_neighbors_borrow, 1, 1)
 
                     preds = torch.sum( dist_prot * preds , dim=1)
 
             outputs.append(preds)
-
+            # outputs.append(preds_v)
         yhat = torch.cat(outputs, dim=0)
         yhat = yhat[:realy.size(0), ...]
 

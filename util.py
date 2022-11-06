@@ -179,9 +179,9 @@ def load_dataset_memory(args, dataset_dir, batch_size, valid_batch_size= None, t
     data = {}
     total_num_nodes = None
     for category in ['train', 'valid', 'test']:
-        data['x_' + category] = torch.load(os.path.join(dataset_dir, 'memory_' + category + '.pt'))[:, 0, :, -1].squeeze()
-        data['y_' + category] = torch.load(os.path.join(dataset_dir, 'memory_' + category + '_label.pt'))[:, -1, :, 0].squeeze()
-        data['y_' + category] = torch.repeat_interleave(data['y_' + category], 3, dim=0)
+        data['x_' + category] = torch.load(os.path.join(dataset_dir, 'memory_' + category + '.pt'))[:, 0, :, :].squeeze()
+        data['y_' + category] = torch.load(os.path.join(dataset_dir, 'memory_' + category + '_label.pt'))[:, :, :, 0].squeeze()
+        data['y_' + category] = torch.repeat_interleave(data['y_' + category], 5, dim=0)
 
         print("Shape of ", category, " input = ", data['x_' + category].shape)
 
@@ -301,7 +301,38 @@ def obtain_relevant_data_from_prototypes(args, testx, instance_prototypes, idx_c
         testx[start:end] = _local
 
     orig_neighs = torch.cat(orig_neighs, dim=0)
-    return testx, min_values, orig_neighs, topk_idxs, original_instance
+
+    # cal separate variables
+    idx_current_nodes = idx_current_nodes.sort().values
+    dist_v = torch.zeros([b_size, idx_current_nodes.shape[0], args.num_neighbors_borrow], device=args.device)
+    i = 0
+    for node in idx_current_nodes:
+        a = original_instance[:, :, node, :].squeeze().repeat(args.num_neighbors_borrow, 1)
+        b = orig_neighs[:, :, node, :].squeeze()
+        raw_tmp = a - b
+        tmp = torch.pow( torch.absolute( raw_tmp ), 2 ).view(b_size, args.num_neighbors_borrow, -1)
+        tmp = torch.mean(tmp, dim=-1)
+        dist_v[:, i, :] = torch.nn.functional.softmax(-tmp / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow)
+        i += 1
+
+    j = 0
+
+    testx_split = []
+    b_size = testx.shape[0] // args.num_neighbors_borrow
+    for jj in range(args.num_neighbors_borrow):
+        start, end = jj * b_size, (jj + 1) * b_size
+        testx_split.append(testx[start:end])
+    testx_s = torch.cat(testx_split, dim=1)
+    testx_v = torch.zeros(testx_s[:, 0, :, :].shape).unsqueeze(1)
+    for i in range(testx.shape[2]):
+        if j < len(idx_current_nodes)-1 and i - idx_current_nodes[j] > idx_current_nodes[j+1] - i:
+            j += 1
+        a = testx_s[:, :, i, :].unsqueeze(2)
+        b = dist_v[:, j, :].view(b_size, args.num_neighbors_borrow, 1, 1)
+        c = a*b
+        testx_v[:, :, i, :] = torch.sum(c, dim=1)
+
+    return testx, min_values, orig_neighs, topk_idxs, original_instance, testx_v
 
 
 
@@ -327,7 +358,7 @@ def normal_std(x):
 def obtain_discrepancy_from_neighs(preds, orig_neighs_forecasts, args, idx_current_nodes):
     orig_neighs_forecasts = orig_neighs_forecasts.transpose(1, 3)
     orig_neighs_forecasts = orig_neighs_forecasts[:, 0, :, :]
-    orig_neighs_forecasts = orig_neighs_forecasts[:, idx_current_nodes, :]
+    # orig_neighs_forecasts = orig_neighs_forecasts[:, idx_current_nodes, :]
 
     orig_neighs_forecasts = torch.chunk(orig_neighs_forecasts, args.num_neighbors_borrow)
     orig_neighs_forecasts = [ a.unsqueeze(1) for a in orig_neighs_forecasts ]

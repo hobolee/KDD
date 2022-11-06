@@ -6,9 +6,13 @@ import argparse
 import time
 from util import *
 from trainer import Trainer, Trainer_memory
-from net import gtnet, memory
+from net import gtnet, memory, s2s_gtnet
 import ast
 from copy import deepcopy
+from encoder import Encoder
+from decoder import Decoder
+from model import ED
+from net_params import convgru_encoder_params, convgru_decoder_params
 
 
 def str_to_bool(value):
@@ -159,7 +163,10 @@ def main(runid):
     if not os.path.exists(args.path_model_save):
         os.makedirs(args.path_model_save)
 
-    model = memory(args.num_nodes)
+    # model = memory(args.num_nodes)
+    encoder = Encoder(convgru_encoder_params[0], convgru_encoder_params[1])
+    decoder = Decoder(convgru_decoder_params[0], convgru_decoder_params[1])
+    model = ED(encoder, decoder)
 
     print(args)
     nParams = sum([p.nelement() for p in model.parameters()])
@@ -186,6 +193,10 @@ def main(runid):
             if iter % args.step_size2 == 0:
                 perm = np.random.permutation(range(args.num_nodes))
 
+            trainx = trainx.unsqueeze(1)
+            trainy = trainy.unsqueeze(1)
+            trainx = torch.permute(trainx, [0, 3, 1, 2])
+            trainy = torch.permute(trainy, [0, 2, 1, 3])
             metrics = engine.train(args, trainx, trainy, i, dataloader['train_loader'].num_batch, iter)
 
             train_loss.append(metrics[0])
@@ -205,6 +216,10 @@ def main(runid):
         for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
             testx = torch.Tensor(x).to(device)
             testy = torch.Tensor(y).to(device)
+            testx = testx.unsqueeze(1)
+            testy = testy.unsqueeze(1)
+            testx = torch.permute(testx, [0, 3, 1, 2])
+            testy = torch.permute(testy, [0, 2, 1, 3])
             metrics = engine.eval(args, testx, testy)
             valid_loss.append(metrics[0])
             valid_rmse.append(metrics[1])

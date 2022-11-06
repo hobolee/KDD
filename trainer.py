@@ -179,5 +179,5 @@ class Trainer_memory():
         # loss = self.loss(predict, real, 0.0)
         loss = torch.nn.functional.mse_loss(predict, real_val)
         rmse = util.masked_rmse(predict, real, 0.0)[0].item()
-        return loss.item(), rmse
+        return loss.item(), rmse, predict
 
