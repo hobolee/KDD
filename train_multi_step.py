@@ -254,7 +254,7 @@ def main(runid):
         print("Training finished")
         print("The valid loss on best model is", str(round(his_loss[bestid],4)))
 
-
+    # code to load the model
     engine.model.load_state_dict(torch.load(args.path_model_save + "exp" + str(args.expid) + "_" + str(runid) +".pth"))
     print("\nModel loaded\n")
 
@@ -307,7 +307,7 @@ def main(runid):
                 if args.borrow_from_train_data:
                     # TODO Here derive kNN Neighbors. 
                     # Our proposal modify how to retrieve the K-neighbourhoods. 
-                    # Change this obrain_relavant_data_from_prototypes to something else. 
+                    # Change this obtain_relavant_data_from_prototypes to something else. The definition of it is from util.py
                     #
                     # the code should be like follows. 
                     # Eventually we need to return neighbours in a new method
@@ -381,7 +381,7 @@ def main(runid):
 
             print("Number of nodes in current oracle random split = ", full_set_oracle_idx.shape)
 
-        for i in range(args.seq_out_len):   # this computes the metrics for multiple horizons lengths, individually, starting from 0 to args.seq_out_len
+        for i in range(args.seq_out_len):   # this computes the metrics for multiple horizons lengths, individually, starting from 0 to args.seq_out_len. Here in the paper setting, we predict the 12 stpes.
             pred = scaler.inverse_transform(yhat[:, :, i])
             real = realy[:, :, i]
 
