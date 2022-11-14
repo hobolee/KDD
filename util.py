@@ -16,7 +16,7 @@ from scipy.sparse import linalg
 from torch.autograd import Variable
 import networkx as nx
 import time
-
+from pyts.preprocessing import InterpolationImputer
 
 def normal_std(x):
     return x.std() * np.sqrt((len(x) - 1.)/(len(x)))
@@ -302,37 +302,52 @@ def obtain_relevant_data_from_prototypes(args, testx, instance_prototypes, idx_c
 
     orig_neighs = torch.cat(orig_neighs, dim=0)
 
-    # cal separate variables
+
+    # cal imputer
     idx_current_nodes = idx_current_nodes.sort().values
-    dist_v = torch.zeros([b_size, idx_current_nodes.shape[0], args.num_neighbors_borrow], device=args.device)
-    i = 0
-    for node in idx_current_nodes:
-        a = original_instance[:, :, node, :].squeeze().repeat(args.num_neighbors_borrow, 1)
-        b = orig_neighs[:, :, node, :].squeeze()
-        raw_tmp = a - b
-        tmp = torch.pow( torch.absolute( raw_tmp ), 2 ).view(b_size, args.num_neighbors_borrow, -1)
-        tmp = torch.mean(tmp, dim=-1)
-        dist_v[:, i, :] = torch.nn.functional.softmax(-tmp / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow)
-        i += 1
+    # testx_v = testx.clone()
+    # imputer = InterpolationImputer(strategy='quadratic')
+    # for j in range(12):
+    #     a = np.array(torch.Tensor.cpu(testx[:, :, :, j].squeeze()))
+    #     for i in range(a.shape[-1]):
+    #         if i not in idx_current_nodes:
+    #             a[:, i] = np.nan
+    #             a = imputer.transform(a)
+    #
+    #     testx_v[:, :, :, j] = torch.from_numpy(a).unsqueeze(1)
 
-    j = 0
 
-    testx_split = []
-    b_size = testx.shape[0] // args.num_neighbors_borrow
-    for jj in range(args.num_neighbors_borrow):
-        start, end = jj * b_size, (jj + 1) * b_size
-        testx_split.append(testx[start:end])
-    testx_s = torch.cat(testx_split, dim=1)
-    testx_v = torch.zeros(testx_s[:, 0, :, :].shape).unsqueeze(1)
-    for i in range(testx.shape[2]):
-        if j < len(idx_current_nodes)-1 and i - idx_current_nodes[j] > idx_current_nodes[j+1] - i:
-            j += 1
-        a = testx_s[:, :, i, :].unsqueeze(2)
-        b = dist_v[:, j, :].view(b_size, args.num_neighbors_borrow, 1, 1)
-        c = a*b
-        testx_v[:, :, i, :] = torch.sum(c, dim=1)
+    # cal separate variables
+    # idx_current_nodes = idx_current_nodes.sort().values
+    # dist_v = torch.zeros([b_size, idx_current_nodes.shape[0], args.num_neighbors_borrow], device=args.device)
+    # i = 0
+    # for node in idx_current_nodes:
+    #     a = original_instance[:, :, node, :].squeeze().repeat(args.num_neighbors_borrow, 1)
+    #     b = orig_neighs[:, :, node, :].squeeze()
+    #     raw_tmp = a - b
+    #     tmp = torch.pow( torch.absolute( raw_tmp ), 2 ).view(b_size, args.num_neighbors_borrow, -1)
+    #     tmp = torch.mean(tmp, dim=-1)
+    #     dist_v[:, i, :] = torch.nn.functional.softmax(-tmp / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow)
+    #     i += 1
+    #
+    # j = 0
+    #
+    # testx_split = []
+    # b_size = testx.shape[0] // args.num_neighbors_borrow
+    # for jj in range(args.num_neighbors_borrow):
+    #     start, end = jj * b_size, (jj + 1) * b_size
+    #     testx_split.append(testx[start:end])
+    # testx_s = torch.cat(testx_split, dim=1)
+    # testx_v = torch.zeros(testx_s[:, 0, :, :].shape).unsqueeze(1)
+    # for i in range(testx.shape[2]):
+    #     if j < len(idx_current_nodes)-1 and i - idx_current_nodes[j] > idx_current_nodes[j+1] - i:
+    #         j += 1
+    #     a = testx_s[:, :, i, :].unsqueeze(2)
+    #     b = dist_v[:, j, :].view(b_size, args.num_neighbors_borrow, 1, 1)
+    #     c = a*b
+    #     testx_v[:, :, i, :] = torch.sum(c, dim=1)
 
-    return testx, min_values, orig_neighs, topk_idxs, original_instance, testx_v
+    return testx, min_values, orig_neighs, topk_idxs, original_instance
 
 
 
@@ -355,10 +370,10 @@ def normal_std(x):
     return x.std() * np.sqrt((len(x) - 1.) / (len(x)))
 
 
-def obtain_discrepancy_from_neighs(preds, orig_neighs_forecasts, args, idx_current_nodes):
+def obtain_discrepancy_from_neighs(preds, orig_neighs_forecasts, args, idx_current_nodes, testx):
     orig_neighs_forecasts = orig_neighs_forecasts.transpose(1, 3)
     orig_neighs_forecasts = orig_neighs_forecasts[:, 0, :, :]
-    # orig_neighs_forecasts = orig_neighs_forecasts[:, idx_current_nodes, :]
+    orig_neighs_forecasts = orig_neighs_forecasts[:, idx_current_nodes, :]
 
     orig_neighs_forecasts = torch.chunk(orig_neighs_forecasts, args.num_neighbors_borrow)
     orig_neighs_forecasts = [ a.unsqueeze(1) for a in orig_neighs_forecasts ]
@@ -368,4 +383,34 @@ def obtain_discrepancy_from_neighs(preds, orig_neighs_forecasts, args, idx_curre
                               preds.shape[0], args.num_neighbors_borrow, preds.shape[2], 1) # tensor of time step indexes
     distance = torch.absolute( (preds - orig_neighs_forecasts) / len_tensor ).view(preds.shape[0], args.num_neighbors_borrow, -1)
     distance = torch.mean(distance, dim=-1)
-    return distance, orig_neighs_forecasts
+
+    # cal separate variables FDW
+    distance_v = torch.absolute((preds - orig_neighs_forecasts) / len_tensor).view(preds.shape[0],
+                                                                                   args.num_neighbors_borrow,
+                                                                                   len(idx_current_nodes), -1)
+    b_size = distance_v.shape[0]
+
+    dist_v = torch.zeros([b_size, args.num_neighbors_borrow, idx_current_nodes.shape[0]], device=args.device)
+
+    for node in range(idx_current_nodes.shape[0]):
+        tmp = distance_v[:, :, node, -1]
+        # tmp = torch.mean(distance_v[:, :, node, :], dim=-1)
+        dist_v[:, :, node] = torch.nn.functional.softmax(-tmp / args.neighbor_temp, dim=-1).view(b_size,
+                                                                                                 args.num_neighbors_borrow)
+    j = 0
+    testx_split = []
+    b_size = distance_v.shape[0]
+    for jj in range(args.num_neighbors_borrow):
+        start, end = jj * b_size, (jj + 1) * b_size
+        testx_split.append(testx[start:end])
+    testx_s = torch.cat(testx_split, dim=1)
+    testx_v = torch.zeros(testx_s[:, 0, :, :].shape).unsqueeze(1)
+    # for i in range(testx.shape[2]):
+    #     if j < len(idx_current_nodes) - 1 and i - idx_current_nodes[j] > idx_current_nodes[j + 1] - i:
+    #         j += 1
+    #     a = testx_s[:, :, i, :].unsqueeze(2)
+    #     b = dist_v[:, :, j].view(b_size, args.num_neighbors_borrow, 1, 1)
+    #     c = a * b
+    #     testx_v[:, :, i, :] = torch.sum(c, dim=1)
+
+    return distance, orig_neighs_forecasts, testx_v

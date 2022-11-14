@@ -191,7 +191,6 @@ def main(runid):
     print('Number of model parameters is', nParams)
 
 
-    # engine = Trainer(args, s2s_gtnet_model, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, scaler, device, args.cl)
     engine = Trainer(args, model, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, scaler, device, args.cl)
     engine2 = Trainer_memory(args, s2s, args.model_name, args.learning_rate, args.weight_decay, args.clip, args.step_size1, scaler, device, args.cl)
 
@@ -312,9 +311,6 @@ def main(runid):
             else:
                 idx_current_nodes = get_node_random_idx_split(args, args.num_nodes, args.lower_limit_random_node_selections, args.upper_limit_random_node_selections)
 
-            # print(idx_current_nodes)
-            # idx_current_nodes = np.array([ 33, 114,  42,  54, 110,  62, 121,  74, 131,   1, 111, 116,   9,  56,  38, 113,  22, 119, 129, 109,  41])
-            # print(idx_current_nodes)
             print("Number of nodes in current random split run = ", idx_current_nodes.shape)
 
 
@@ -322,17 +318,17 @@ def main(runid):
         outputs_v = []
         realy = torch.Tensor(dataloader['y_test']).to(device)
         realy = realy.transpose(1, 3)[:, 0, :, :]
-        # if not args.predefined_S:
-        #     realy = realy[:, idx_current_nodes, :]
+        if not args.predefined_S:
+            realy = realy[:, idx_current_nodes, :]
 
 
         for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
             testx = torch.Tensor(x).to(device)
             testx = testx.transpose(1, 3)
-
+            testx_v = testx
             if not args.predefined_S:
                 if args.borrow_from_train_data:
-                    testx, dist_prot, orig_neighs, neighbs_idxs, original_instances, testx_v = obtain_relevant_data_from_prototypes(args, testx, instance_prototypes,
+                    testx, dist_prot, orig_neighs, neighbs_idxs, original_instances = obtain_relevant_data_from_prototypes(args, testx, instance_prototypes,
                                                                                             idx_current_nodes)
                 else:
                     testx = zero_out_remaining_input(testx, idx_current_nodes, args.device) # Remove the data corresponding to the variables that are not a part of subset "S"
@@ -341,20 +337,21 @@ def main(runid):
                 if args.predefined_S:
                     idx_current_nodes = None
 
-                # testx = torch.permute(testx, [0, 3, 1, 2])
-                # testx = engine2.model(testx)
-                # testx = torch.permute(testx, [0, 2, 3, 1])
+                testx = torch.permute(testx, [0, 3, 1, 2])
+                testx = engine2.model(testx)
+                testx = torch.permute(testx, [0, 2, 3, 1])
                 preds = engine.model(testx, args=args, mask_remaining=args.mask_remaining, test_idx_subset=idx_current_nodes)
                 testx_v = testx_v.to(args.device)
+                testx_v = torch.permute(testx_v, [0, 3, 1, 2])
                 preds_v = engine.model(testx_v, args=args, mask_remaining=args.mask_remaining, test_idx_subset=idx_current_nodes)
 
                 preds = preds.transpose(1, 3)
                 preds = preds[:, 0, :, :]
                 preds_v = preds_v.transpose(1, 3)
                 preds_v = preds_v[:, 0, :, :]
-                # if not args.predefined_S:
-                #     preds = preds[:, idx_current_nodes, :]
-                #     preds_v = preds_v[:, idx_current_nodes, :]
+                if not args.predefined_S:
+                    preds = preds[:, idx_current_nodes, :]
+                    preds_v = preds_v[:, idx_current_nodes, :]
 
                 # aggregating from multiple neighbors
                 if args.borrow_from_train_data:
@@ -366,9 +363,9 @@ def main(runid):
                     preds = torch.cat(_split_preds, dim=1)
 
                     if args.use_ewp:
-                        # orig_neighs = torch.permute(orig_neighs, [0, 3, 1, 2])
+                        orig_neighs = torch.permute(orig_neighs, [0, 3, 1, 2])
                         orig_neighs_forecasts = engine.model(orig_neighs, args=args, mask_remaining=args.mask_remaining, test_idx_subset=idx_current_nodes)
-                        dist_prot, orig_neighs_forecasts_reshaped = obtain_discrepancy_from_neighs(preds, orig_neighs_forecasts, args, idx_current_nodes)
+                        dist_prot, orig_neighs_forecasts_reshaped, testx_v = obtain_discrepancy_from_neighs(preds, orig_neighs_forecasts, args, idx_current_nodes, testx)
                         dist_prot = torch.nn.functional.softmax(-dist_prot / args.neighbor_temp, dim=-1).view(b_size, args.num_neighbors_borrow, 1, 1)
 
                     else:
@@ -379,10 +376,17 @@ def main(runid):
                         # uniform_tensor = torch.FloatTensor( np.ones(args.num_neighbors_borrow) / args.num_neighbors_borrow ).to(args.device).unsqueeze(0).repeat(b_size, 1)
                         # dist_prot = uniform_tensor.view(b_size, args.num_neighbors_borrow, 1, 1)
 
-                    preds = torch.sum( dist_prot * preds , dim=1)
+                    preds = torch.sum( dist_prot * preds, dim=1)
+                testx_v = testx_v.to(args.device)
+                preds_v = engine.model(testx_v, args=args, mask_remaining=args.mask_remaining,
+                                       test_idx_subset=idx_current_nodes)
+                preds_v = preds_v.transpose(1, 3)
+                preds_v = preds_v[:, 0, :, :]
+                if not args.predefined_S:
+                    preds_v = preds_v[:, idx_current_nodes, :]
 
-            outputs.append(preds)
-            # outputs.append(preds_v)
+            # outputs.append(preds)
+            outputs.append(preds_v)
         yhat = torch.cat(outputs, dim=0)
         yhat = yhat[:realy.size(0), ...]
 
