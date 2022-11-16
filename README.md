@@ -6,6 +6,9 @@
 
 ### For the Memory module and SFDW, please check the branch "memory"
 
+
+
+
 #### Multivariate time series datasets:
 
 Download Solar and Traffic datasets from [https://github.com/laiguokun/multivariate-time-series-data](https://github.com/laiguokun/multivariate-time-series-data). Uncompress them and move them to the data folder.
