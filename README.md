@@ -1,5 +1,6 @@
 ## EF-DTW and 10%-DTW
 
+### Check different settings and methods
 ### Partial setting inference
 ```
 python test.py --data ./data/ENERGY --model_name tri1 --expid 1 --runs 1 --random_node_idx_split_runs 100 --lower_limit_random_node_selections 15 --upper_limit_random_node_selections 15 --mask_remaining True
