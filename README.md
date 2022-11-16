@@ -1,12 +1,12 @@
 ##  Course Project: COMP 5331 Group 8 (22-fall).
 
-Here we integrated the implementation of four proposed methods.
+#### Here we integrated the implementation of four proposed methods.
 
 ### For the EF-DTW and 10%-DTW, please check the branch "euclidean_dtw"
 
 ### For the Memory module and SFDW, please check the branch "memory"
 
-#### Multivariate time series datasets
+#### Multivariate time series datasets:
 
 Download Solar and Traffic datasets from [https://github.com/laiguokun/multivariate-time-series-data](https://github.com/laiguokun/multivariate-time-series-data). Uncompress them and move them to the data folder.
 
