@@ -8,7 +8,7 @@ def make_layers(block):
         if 'pool' in layer_name:
             layer = nn.MaxPool1d(kernel_size=v[0], stride=v[1], padding=v[2])
             layers.append((layer_name, layer))
-        elif 'deconv3' in layer_name or 'deconv2' in layer_name:
+        elif 'deconv3' in layer_name:
             transposeConv1d = nn.ConvTranspose1d(in_channels=v[0],
                                                  out_channels=v[1],
                                                  kernel_size=v[2],
@@ -24,7 +24,7 @@ def make_layers(block):
                                # nn.Tanh()))
                                # nn.Sigmoid()))
                                nn.LeakyReLU(negative_slope=0.2, inplace=True)))
-        elif 'deconv1' in layer_name:
+        elif 'deconv' in layer_name:
             transposeConv1d = nn.ConvTranspose1d(in_channels=v[0],
                                                  out_channels=v[1],
                                                  kernel_size=v[2],
