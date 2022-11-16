@@ -1,4 +1,4 @@
-## Inference
+## EF-DTW and 10%-DTW
 
 ### Partial setting inference
 ```
@@ -42,4 +42,4 @@ The model is implemented using Python3 with dependencies specified in requiremen
 
 ### Multivariate time series datasets
 
-Please refers haobo's main branch to get the pre-processed datasets.
+Please refers haobo's branch(memory) or the kdd paper's repo to get the pre-processed datasets.
